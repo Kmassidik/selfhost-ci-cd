@@ -1,0 +1,90 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is intentionally tracked: this is a binary crate, not a library.
+# Do not add it here.
+
+# Build output
+/dist/
+/release/
+*.snap
+*.deb
+*.rpm
+*.msi
+*.pkg
+*.AppImage
+*.tar.gz
+*.tar.zst
+*.zip
+!.github/**
+
+# Nix
+/result
+/result-*
+/.direnv/
+/.nix-profile/
+/flake.lock.bak
+
+# Secrets — never commit, never stage, never "just for testing"
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+master.key
+secrets.sealed
+secrets.*.sealed
+
+# Runtime state if the repo is ever used as a working directory
+/etc/cicd/
+/var/lib/cicd/
+/devdata/
+/devdata2/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/data/
+/builds/
+/artifacts/
+
+# Logs and coverage
+*.log
+/logs/
+lcov.info
+tarpaulin-report.html
+coverage/
+*.profraw
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.claude/
+.cursor/
+
+# Markdown — only the root README is published
+*.md
+!/README.md
+
+# OS noise
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Local scratch — experiments that must not reach the remote
+/scratch/
+/tmp/
+*.local.md

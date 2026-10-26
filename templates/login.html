@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · {{ instance }}</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="center">
+<main class="card">
+  <h1>{{ instance }}</h1>
+  <p class="muted">Sign in to continue</p>
+  {% if !error.is_empty() %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/login" autocomplete="on">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ username }}" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</main>
+</body>
+</html>

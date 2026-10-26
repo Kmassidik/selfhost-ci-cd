@@ -1,0 +1,25 @@
+[package]
+name = "cicd"
+version = "1.0.0-alpha.1"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.11.1"
+anyhow = "1.0.104"
+argon2 = "0.6.0"
+askama = "0.16.1"
+askama_web = { version = "0.16.0", features = ["axum-0.8"] }
+axum = { version = "0.8.9", features = ["form", "query"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive"] }
+cookie = "0.18.2"
+libc = "0.2.191"
+rand = "0.10.3"
+rpassword = "7.5.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "time", "io-util"] }
+toml = "1.1.8"

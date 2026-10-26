@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ instance }} · dashboard</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<header class="bar">
+  <strong>{{ instance }}</strong>
+  <span class="muted">v{{ version }}</span>
+  <span class="spacer"></span>
+  <span class="muted">{{ user }}</span>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="ghost">Sign out</button>
+  </form>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <h2>Instance</h2>
+    <dl class="grid">
+      <dt>Ingress</dt><dd>{{ ingress }}</dd>
+      <dt>Baseline</dt><dd><code>{{ baseline }}</code></dd>
+      <dt>Backends</dt><dd>{{ backends }}</dd>
+      <dt>Targets</dt><dd>{{ targets }}</dd>
+      <dt>Sessions</dt><dd>{{ sessions }}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Platform</h2>
+    <pre class="probe">{{ probe }}</pre>
+  </section>
+
+  <section class="card">
+    <h2>Not built yet</h2>
+    <p class="muted">This build covers milestone M0 (probe, config, sealed secrets) and the
+    M1 shell (SSR pages, login, sessions, hardened responses).</p>
+    <ul class="todo">
+      <li>M2 — Cloudflare tunnel, DNS, self-verify</li>
+      <li>M3 — webhooks, queue, agent protocol, logs</li>
+      <li>M4 — Linux builds with Docker and Nix</li>
+      <li>M5 — local registry and artifacts</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
