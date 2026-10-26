@@ -11,6 +11,21 @@ use crate::probe::Probe;
 use anyhow::{bail, Context, Result};
 use std::io::{IsTerminal, Write};
 
+struct CfMeta {
+    zone: String,
+    zone_id: String,
+    account: String,
+    tunnel_id: String,
+}
+
+struct CfInputs {
+    hostname: String,
+    zone: String,
+    account: Option<String>,
+    token: String,
+    tunnel_name: String,
+}
+
 pub struct Options {
     pub reconfigure: bool,
     pub teardown: bool,
@@ -69,14 +84,28 @@ pub fn run(paths: &Paths, opts: &Options) -> Result<()> {
             _ => "1",
         },
     )?;
+    let mut cf_ctx: Option<CfInputs> = None;
     let (mode, hostname) = match mode_input.trim() {
         "1" | "lan" => ("lan".to_string(), None),
         "2" | "cloudflare" => {
             println!();
-            println!("  Cloudflare provisioning (tunnel + proxied CNAME) is milestone M2 and is");
-            println!("  not in this build yet. Nothing has been written.");
-            println!("  Re-run setup and choose 1 (lan) to continue testing locally.");
-            bail!("cloudflare ingress is not implemented in this build");
+            println!("Cloudflare — the dashboard will be served live at the hostname you choose.");
+            let host = ask("Dashboard hostname (e.g. ci.example.com)", "")?;
+            let zone = ask(
+                "Zone (e.g. example.com)",
+                default_zone(&host).as_str(),
+            )?;
+            let account = ask("Account id (blank = the only account on the token)", "")?;
+            let token = ask_secret("Cloudflare API token")?;
+            let tunnel_name = ask("Tunnel name", "selfhost-ci-cd")?;
+            cf_ctx = Some(CfInputs {
+                hostname: host.clone(),
+                zone,
+                account: if account.trim().is_empty() { None } else { Some(account) },
+                token,
+                tunnel_name,
+            });
+            ("cloudflare".to_string(), Some(host))
         }
         "3" | "direct" => {
             println!();
@@ -103,6 +132,62 @@ pub fn run(paths: &Paths, opts: &Options) -> Result<()> {
     .parse()
     .context("port must be a number between 1 and 65535")?;
     println!();
+
+    // Cloudflare: preflight first, refuse on conflicts, only then touch the account.
+    let mut tunnel_token: Option<String> = None;
+    let mut cf_meta: Option<CfMeta> = None;
+    if let Some(ctx) = &cf_ctx {
+        println!("Cloudflare preflight for {}\n", ctx.hostname);
+        let cf = crate::cloudflare::Cf::new(ctx.token.clone());
+        let pf = crate::cloudflare::preflight(
+            &cf,
+            &ctx.zone,
+            &ctx.hostname,
+            ctx.account.as_deref(),
+            &ctx.tunnel_name,
+        )?;
+        println!("  account  {}", pf.account);
+        println!("  zone     {} ({})", pf.zone.name, pf.zone.id);
+        let conflicts = pf.conflicts(&ctx.hostname, &ctx.tunnel_name);
+        if !conflicts.is_empty() {
+            println!();
+            for c in &conflicts {
+                println!("CONFLICT ({}): {}", c.kind, c.detail);
+                for line in &c.fix {
+                    println!("  {line}");
+                }
+                println!();
+            }
+            bail!(
+                "{} conflict(s) found. Nothing was changed. Remove them as shown above and re-run setup.",
+                conflicts.len()
+            );
+        }
+        println!("  conflicts none");
+        if !confirm(
+            &format!("Provision tunnel `{}` and CNAME for {} now?", ctx.tunnel_name, ctx.hostname),
+            true,
+        )? {
+            bail!("aborted before provisioning; nothing was changed");
+        }
+        let service = format!("http://127.0.0.1:{port}");
+        let (tunnel_id, token) = crate::cloudflare::provision(
+            &cf,
+            &pf,
+            &ctx.hostname,
+            &ctx.tunnel_name,
+            &service,
+        )?;
+        tunnel_token = Some(token);
+        cf_meta = Some(CfMeta {
+            zone: pf.zone.name.clone(),
+            zone_id: pf.zone.id.clone(),
+            account: pf.account.clone(),
+            tunnel_id,
+        });
+        println!("  provisioned tunnel + DNS record");
+        println!();
+    }
 
     // ---- backends -------------------------------------------------------
     let has_docker = have_binary("docker");
@@ -181,7 +266,7 @@ pub fn run(paths: &Paths, opts: &Options) -> Result<()> {
 
     // Capture provider tokens before `existing` is consumed, so rotating one secret does not
     // wipe the others.
-    let old_providers = existing
+    let mut providers = existing
         .as_ref()
         .map(|(_, s, _)| s.providers.clone())
         .unwrap_or_default();
@@ -200,16 +285,26 @@ pub fn run(paths: &Paths, opts: &Options) -> Result<()> {
             port,
             probe,
         },
-        ingress: Ingress { mode, hostname },
+        ingress: Ingress {
+            mode,
+            hostname,
+            zone: cf_meta.as_ref().map(|m| m.zone.clone()),
+            zone_id: cf_meta.as_ref().map(|m| m.zone_id.clone()),
+            account: cf_meta.as_ref().map(|m| m.account.clone()),
+            tunnel_id: cf_meta.as_ref().map(|m| m.tunnel_id.clone()),
+        },
         build: BuildConfig { backends },
         targets,
     };
     config::write_config(paths, &cfg)?;
 
+    if let Some(token) = tunnel_token {
+        providers.insert("cloudflare_tunnel".to_string(), token);
+    }
     let secrets = Secrets {
         admin_password_hash: password_hash,
         session_secret: crate::crypto::random_token(32),
-        providers: old_providers,
+        providers,
     };
     config::write_secrets(paths, &vault, &secrets)?;
 
@@ -221,7 +316,10 @@ pub fn run(paths: &Paths, opts: &Options) -> Result<()> {
     println!();
     println!("Next:");
     println!("  cicd serve --root {}", paths.root.display());
-    println!("  then open http://{listen}/login");
+    match &cfg.ingress.hostname {
+        Some(h) => println!("  dashboard will be served at https://{h}/ (cloudflared must be running)"),
+        None => println!("  then open http://{listen}/login"),
+    }
     Ok(())
 }
 
@@ -275,9 +373,57 @@ fn teardown(paths: &Paths) -> Result<()> {
         println!("Aborted.");
         return Ok(());
     }
+
+    // Cloudflare cleanup happens before local removal, and in the documented order:
+    // DNS record first, then the tunnel.
+    if let Ok(cfg) = config::load_config(paths) {
+        if cfg.ingress.mode == "cloudflare" {
+            if let (Some(zone_id), Some(host)) =
+                (cfg.ingress.zone_id.as_deref(), cfg.ingress.hostname.as_deref())
+            {
+                println!("\nCloudflare cleanup for {host}");
+                let token = ask_secret("Cloudflare API token (needed to delete DNS and tunnel)")?;
+                let cf = crate::cloudflare::Cf::new(token);
+                match cf.dns_at(zone_id, host) {
+                    Ok(records) if records.is_empty() => println!("  dns      nothing to delete"),
+                    Ok(records) => {
+                        for r in &records {
+                            match cf.delete_dns(zone_id, &r.id) {
+                                Ok(()) => println!("  dns      deleted {} {}", r.rtype, r.id),
+                                Err(e) => println!("  dns      could not delete {}: {e}", r.id),
+                            }
+                        }
+                    }
+                    Err(e) => println!("  dns      lookup failed: {e}"),
+                }
+                let tunnel_id = cfg.ingress.tunnel_id.as_deref().unwrap_or("");
+                let account = cfg.ingress.account.as_deref().unwrap_or("");
+                if !tunnel_id.is_empty() && !account.is_empty() {
+                    match cf.delete_tunnel(account, tunnel_id) {
+                        Ok(()) => println!("  tunnel   deleted {tunnel_id}"),
+                        Err(e) => {
+                            println!("  tunnel   could not delete {tunnel_id}: {e}");
+                            println!("           if a connector is still running, stop it first:");
+                            println!("             sudo cloudflared service uninstall");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     std::fs::remove_dir_all(&paths.root)?;
     println!("Removed {}", paths.root.display());
     Ok(())
+}
+
+/// Best-effort zone guess: drop the leftmost label. The wizard shows this as a default and
+/// the operator can correct it, so a wrong guess costs one keystroke, not a failed install.
+fn default_zone(hostname: &str) -> String {
+    match hostname.split_once('.') {
+        Some((_, rest)) if rest.contains('.') => rest.to_string(),
+        _ => hostname.to_string(),
+    }
 }
 
 fn yesno(v: bool) -> &'static str {

@@ -36,6 +36,15 @@ pub struct Ingress {
     /// `lan`, `cloudflare`, or `direct`.
     pub mode: String,
     pub hostname: Option<String>,
+    /// Filled during provisioning so teardown can delete exactly what this instance created.
+    #[serde(default)]
+    pub zone: Option<String>,
+    #[serde(default)]
+    pub zone_id: Option<String>,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub tunnel_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,7 +163,14 @@ mod tests {
                     unavailable: vec![],
                 },
             },
-            ingress: Ingress { mode: "lan".into(), hostname: None },
+            ingress: Ingress {
+                mode: "lan".into(),
+                hostname: None,
+                zone: None,
+                zone_id: None,
+                account: None,
+                tunnel_id: None,
+            },
             build: BuildConfig { backends: vec!["docker".into()] },
             targets: vec!["linux".into()],
         }

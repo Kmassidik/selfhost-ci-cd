@@ -1,4 +1,5 @@
 mod auth;
+mod cloudflare;
 mod config;
 mod crypto;
 mod probe;
@@ -42,6 +43,29 @@ enum Command {
     Status,
     /// Run the server in the foreground
     Serve,
+    /// Cloudflare ingress checks and provisioning
+    Cloudflare {
+        #[command(subcommand)]
+        cmd: CloudflareCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum CloudflareCmd {
+    /// Check a hostname and tunnel name for conflicts. Read-only: changes nothing.
+    Check {
+        #[arg(long)]
+        zone: String,
+        #[arg(long)]
+        hostname: String,
+        #[arg(long)]
+        account: Option<String>,
+        #[arg(long, default_value = "selfhost-ci-cd")]
+        tunnel_name: String,
+        /// API token; prompted (hidden) when omitted so it never lands in shell history
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 fn main() {
@@ -66,7 +90,59 @@ fn run() -> Result<()> {
         Command::Status => status(&paths),
         Command::Doctor => doctor(&paths),
         Command::Serve => serve(&paths),
+        Command::Cloudflare { cmd } => match cmd {
+            CloudflareCmd::Check { zone, hostname, account, tunnel_name, token } => {
+                cloudflare_check(&zone, &hostname, account.as_deref(), &tunnel_name, token)
+            }
+        },
     }
+}
+
+fn cloudflare_check(
+    zone: &str,
+    hostname: &str,
+    account: Option<&str>,
+    tunnel_name: &str,
+    token: Option<String>,
+) -> Result<()> {
+    let token = match token {
+        Some(t) => t,
+        None => rpassword::prompt_password("Cloudflare API token (input hidden): ")?,
+    };
+    if token.trim().is_empty() {
+        bail!("no token supplied");
+    }
+    let cf = cloudflare::Cf::new(token.trim().to_string());
+
+    println!("checking {hostname} in zone {zone} (tunnel name: {tunnel_name})");
+    let pf = cloudflare::preflight(&cf, zone, hostname, account, tunnel_name)?;
+    println!("  account  {}", pf.account);
+    println!("  zone     {} ({})", pf.zone.name, pf.zone.id);
+    println!("  dns      {} record(s) at {hostname}", pf.records.len());
+    match &pf.tunnel {
+        Some(t) => println!("  tunnel   {} ({}) status={} connections={}", t.name, t.id, t.status, t.connections),
+        None => println!("  tunnel   none"),
+    }
+
+    let conflicts = pf.conflicts(hostname, tunnel_name);
+    if conflicts.is_empty() {
+        println!("
+ready: no conflicts. `cicd setup` can provision this hostname.");
+        return Ok(());
+    }
+
+    println!();
+    for c in &conflicts {
+        println!("CONFLICT ({}): {}", c.kind, c.detail);
+        for line in &c.fix {
+            println!("  {line}");
+        }
+        println!();
+    }
+    bail!(
+        "{} conflict(s) must be removed before setup can continue",
+        conflicts.len()
+    )
 }
 
 fn status(paths: &config::Paths) -> Result<()> {

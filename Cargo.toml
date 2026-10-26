@@ -23,3 +23,4 @@ sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "net", "fs", "time", "io-util"] }
 toml = "1.1.8"
+ureq = { version = "3.5.0", features = ["json"] }
